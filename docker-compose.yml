@@ -1,0 +1,73 @@
+version: '3.8'
+
+volumes:
+  n8n_data:
+  postgres_data:
+  qdrant_data:
+  cv_compartidos: # Carpeta para depositar los PDFs de los CVs localmente
+
+networks:
+  n8n_red_ia:
+
+services:
+  # 1. Base de datos para n8n (Mayor rendimiento y estabilidad)
+  postgres:
+    image: postgres:16-alpine
+    networks:
+      - n8n_red_ia
+    restart: always
+    environment:
+      - POSTGRES_USER=n8n_user
+      - POSTGRES_PASSWORD=n8n_password_seguro
+      - POSTGRES_DB=n8n_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U n8n_user -d n8n_db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 2. Base de datos Vectorial (Fundamental para embeddings y NLP de los CVs)
+  qdrant:
+    image: qdrant/qdrant
+    networks:
+      - n8n_red_ia
+    restart: always
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # 3. Plataforma n8n
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    networks:
+      - n8n_red_ia
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      # Configuración de Base de Datos
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=n8n_db
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=n8n_user
+      - DB_POSTGRESDB_PASSWORD=n8n_password_seguro
+      
+      # Configuración Regional (Ecuador)
+      - GENERIC_TIMEZONE=America/Guayaquil
+      - TZ=America/Guayaquil
+      
+      # Variables de Entorno para Modelos de Lenguaje (Agrega tus API Keys)
+      # - OPENAI_API_KEY=tu_api_key_aqui 
+      # - ANTHROPIC_API_KEY=tu_api_key_aqui
+      
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Esta ruta permite a n8n leer archivos PDF/Word alojados en la máquina host
+      - ./cvs_entrada:/home/node/.n8n-files 
+    depends_on:
+      postgres:
+        condition: service_healthy
